@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  db:
+    build: .
+    container_name: mysql-database
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: AttendMate
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: apppassword
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql # Add this line
+
+volumes:
+  db_data:
