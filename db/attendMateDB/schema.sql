@@ -44,8 +44,7 @@ CREATE TABLE class (
     room VARCHAR(50),
     day ENUM('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') NOT NULL,
     time TIME NOT NULL,
-    idTeacher INT NOT NULL,
-    FOREIGN KEY (idTeacher) REFERENCES teacher(teacherID) ON DELETE CASCADE
+    absenceLimit INT DEFAULT 3
 );
 
 CREATE TABLE studentsInClasses (
@@ -54,6 +53,14 @@ CREATE TABLE studentsInClasses (
     PRIMARY KEY (classID, studentID),
     FOREIGN KEY (classID) REFERENCES class(classID) ON DELETE CASCADE,
     FOREIGN KEY (studentID) REFERENCES student(studentID) ON DELETE CASCADE
+);
+
+CREATE TABLE teachersInClasses (
+    classID INT NOT NULL,
+    teacherID INT NOT NULL,
+    PRIMARY KEY (classID, teacherID),
+    FOREIGN KEY (classID) REFERENCES class(classID) ON DELETE CASCADE,
+    FOREIGN KEY (teacherID) REFERENCES teacher(teacherID) ON DELETE CASCADE
 );
 
 CREATE TABLE attendanceRecords (
@@ -66,6 +73,14 @@ CREATE TABLE attendanceRecords (
     FOREIGN KEY (classID) REFERENCES class(classID) ON DELETE CASCADE,
     FOREIGN KEY (studentID) REFERENCES student(studentID) ON DELETE CASCADE,
     FOREIGN KEY (status) REFERENCES attendanceStatus(attendanceID) ON DELETE SET NULL
+);
+
+CREATE TABLE Excuse (
+    excuseID INT AUTO_INCREMENT PRIMARY KEY,
+    recordID INT NOT NULL,
+    status ENUM('sent', 'accepted', 'rejected') NOT NULL,
+    filePath VARCHAR(255) NOT NULL,
+    FOREIGN KEY (recordID) REFERENCES attendanceRecords(recordID) ON DELETE CASCADE
 );
 
 -- This are just examples how to insert data into tables
@@ -92,11 +107,17 @@ VALUES (LAST_INSERT_ID(), 20230001);
 INSERT INTO images (studentID, number, path) 
 VALUES (LAST_INSERT_ID(), 1, '/images/students/janesmith1.jpg');
 
-INSERT INTO class (subjectName, year, semester, room, day, time, idTeacher) 
-VALUES ('Software Engineering Project', 2024, 2, '127c', 'monday', '17:05', 1);
+INSERT INTO class (subjectName, year, semester, room, day, time, absenceLimit) 
+VALUES ('Software Engineering Project', 2024, 2, '127c', 'monday', '17:05', 3);
+
+insert into teachersInClasses (classID, teacherID)
+values (1, 1);
 
 INSERT INTO studentsInClasses (classID, studentID) 
 VALUES (1, 1);
 
 INSERT INTO attendanceRecords (classID, studentID, date, time, status) 
 VALUES (1, 1, '2024-12-13', '17:10:23', 1);
+
+INSERT INTO Excuse (recordID, status, filePath) 
+VALUES (1, 'sent', '/excuses/2024-12-13-excuse1.pdf');
