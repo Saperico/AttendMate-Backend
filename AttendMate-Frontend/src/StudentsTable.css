@@ -1,0 +1,28 @@
+
+tr:nth-child(even) {
+    background-color: #E3E2E2;
+}
+
+.table-container {
+    padding: 45px;
+}
+
+table{
+    width: 100%;
+    font-size: x-large;
+    text-align: left;
+    border-collapse: collapse;
+}
+
+td, th {
+    padding-left: 10px;
+    border-bottom: 1px solid #000;
+}
+
+.student-arrow {
+    cursor: pointer;
+}
+
+.absence {
+    padding-left: 50px;
+}

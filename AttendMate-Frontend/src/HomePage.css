@@ -1,0 +1,25 @@
+
+.class-list {
+    display: flex;
+    flex-wrap: wrap;
+
+}
+
+.class-card {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 20px;
+    margin: 10px;
+    cursor: pointer;
+    width: 300px;
+
+}
+
+.class-card:hover {
+    background-color: #f9f9f9;
+}
+
+h1{
+    font-size:300%;
+    padding:30px;
+}

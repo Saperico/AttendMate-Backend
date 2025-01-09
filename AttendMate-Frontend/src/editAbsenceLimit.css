@@ -1,0 +1,18 @@
+.popup {
+    background-color: #E3E2E2;
+    border: 1px #000;
+    padding: 20px;
+    border-radius: 10px;
+    margin-left: 45px;
+    max-width: 200px;
+    text-align: center;
+}
+
+.attendance-limit-button {
+    margin-left: 45px;
+    border: none;
+    border-radius: 10px;
+    font-size: large;
+    padding: 25px;
+    background-color: #E3E2E2;
+}
