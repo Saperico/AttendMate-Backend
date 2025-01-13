@@ -100,3 +100,4 @@ VALUES (1, 1);
 
 INSERT INTO attendanceRecords (classID, studentID, date, time, status) 
 VALUES (1, 1, '2024-12-13', '17:10:23', 1);
+
