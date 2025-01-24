@@ -39,7 +39,7 @@ CREATE TABLE images (
 CREATE TABLE class (
     classID INT AUTO_INCREMENT PRIMARY KEY,
     subjectName VARCHAR(100) NOT NULL,
-    subjectType VARCHAR(50),
+    subjectType ENUM('lecture', 'seminar', 'project', 'lab') NOT NULL,
     subjectNumber VARCHAR(50),
     year INT NOT NULL,
     semester TINYINT CHECK (semester IN (1, 2)) NOT NULL,
@@ -164,16 +164,16 @@ VALUES (LAST_INSERT_ID(), 20230010);
 
 INSERT INTO class (subjectName, subjectType, subjectNumber, year, semester, room, day, time, absenceLimit) 
 VALUES 
-('Data Structures', 'Lecture', 'W04IST-SI1020L', 2024, 1, '205a', 'tuesday', '09:00', 2),
-('Machine Learning', 'Seminar', 'W04IST-SI4052S', 2024, 2, '312b', 'wednesday', '13:00', 3),
-('Software Engineering', 'Lecture', 'W04IST-SI4023L', 2024, 1, '101c', 'friday', '10:00', 3),
-('Artificial Intelligence', 'Project', 'W04IST-SI3060P', 2024, 1, '201b', 'monday', '15:00', 2),
-('Operating Systems', 'Lecture', 'W04IST-SI3030L', 2024, 2, '102a', 'thursday', '11:00', 3),
-('Web Development', 'Lab', 'W04IST-SI1074B', 2024, 1, '110c', 'wednesday', '14:00', 1),
-('Computer Networks', 'Lecture', 'W04IST-SI4054L', 2024, 2, '202a', 'friday', '08:00', 3),
-('Database Systems', 'Seminar', 'W04IST-SI2010S', 2024, 1, '303b', 'tuesday', '16:00', 3),
-('Cloud Computing', 'Lecture', 'W04IST-SI5023L', 2024, 2, '305a', 'thursday', '09:00', 2),
-('Cybersecurity', 'Project', 'W04IST-SI4090P', 2024, 2, '307b', 'monday', '17:00', 3);
+('Data Structures', 'lecture', 'W04IST-SI1020L', 2024, 1, '205a', 'tuesday', '09:00', 2),
+('Machine Learning', 'seminar', 'W04IST-SI4052S', 2024, 2, '312b', 'wednesday', '13:00', 3),
+('Software Engineering', 'lecture', 'W04IST-SI4023L', 2024, 1, '101c', 'friday', '10:00', 3),
+('Artificial Intelligence', 'project', 'W04IST-SI3060P', 2024, 1, '201b', 'monday', '15:00', 2),
+('Operating Systems', 'lecture', 'W04IST-SI3030L', 2024, 2, '102a', 'thursday', '11:00', 3),
+('Web Development', 'lab', 'W04IST-SI1074B', 2024, 1, '110c', 'wednesday', '14:00', 1),
+('Computer Networks', 'lecture', 'W04IST-SI4054L', 2024, 2, '202a', 'friday', '08:00', 3),
+('Database Systems', 'seminar', 'W04IST-SI2010S', 2024, 1, '303b', 'tuesday', '16:00', 3),
+('Cloud Computing', 'lecture', 'W04IST-SI5023L', 2024, 2, '305a', 'thursday', '09:00', 2),
+('Cybersecurity', 'project', 'W04IST-SI4090P', 2024, 2, '307b', 'monday', '17:00', 3);
 
 -- Enroll students into multiple classes
 INSERT INTO studentsInClasses (classID, studentID) 
