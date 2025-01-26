@@ -1,11 +1,14 @@
 import smtplib
 import random
 import string
+from flask_bcrypt import Bcrypt
 
-email = "sapijaszkoeryk@gmail.com"
-server = smtplib.SMTP('smtp.gmail.com', 587)
-server.starttls()
-server.login(email, "oszj yufj puwv fyzp")
+#email = "sapijaszkoeryk@gmail.com"
+#server = smtplib.SMTP('smtp.gmail.com', 587)
+#server.starttls()
+#server.login(email, "oszj yufj puwv fyzp")
+
+bcrypt = Bcrypt()
 
 def send_email(receiver_email, password):
     subject = "AttendMate - Email Verification"
@@ -16,4 +19,7 @@ def send_email(receiver_email, password):
 def generate_password(length=12):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     password = ''.join(random.choices(characters, k=length))
-    return password
+    return 
+
+password = bcrypt.generate_password_hash("password").decode('utf-8')
+print(password)
