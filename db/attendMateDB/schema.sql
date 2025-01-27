@@ -65,18 +65,30 @@ CREATE TABLE teachersInClasses (
     FOREIGN KEY (teacherID) REFERENCES teacher(teacherID) ON DELETE CASCADE
 );
 
+-- Create ClassSession table before attendanceRecords
+CREATE TABLE ClassSession (
+    sessionID INT AUTO_INCREMENT PRIMARY KEY,
+    classID INT NOT NULL,
+    sessionDate DATE NOT NULL,
+    sessionStartTime TIME NOT NULL,
+    sessionEndTime TIME NOT NULL,
+    FOREIGN KEY (classID) REFERENCES class(classID) ON DELETE CASCADE
+);
+
+-- Create attendanceRecords table before Excuse
 CREATE TABLE attendanceRecords (
     recordID INT AUTO_INCREMENT PRIMARY KEY,
-    classID INT NOT NULL,
+    classSessionID INT NOT NULL,
     studentID INT NOT NULL,
     date DATE NOT NULL,
     time TIME NOT NULL,
     status INT,
-    FOREIGN KEY (classID) REFERENCES class(classID) ON DELETE CASCADE,
+    FOREIGN KEY (classSessionID) REFERENCES ClassSession(sessionID) ON DELETE CASCADE,
     FOREIGN KEY (studentID) REFERENCES student(studentID) ON DELETE CASCADE,
     FOREIGN KEY (status) REFERENCES attendanceStatus(attendanceID) ON DELETE SET NULL
 );
 
+-- Now create Excuse table
 CREATE TABLE Excuse (
     excuseID INT AUTO_INCREMENT PRIMARY KEY,
     recordID INT NOT NULL,
@@ -95,8 +107,7 @@ VALUES
     ('excused');
 
 INSERT INTO user (name, lastName, email, password) 
-VALUES ('Alice', 'Johnson', 'alicejohnson@example.com', SHA2('password789', 256));
-
+VALUES ('Alice', 'Johnson', 'alicejohnson@example.com', '$2b$12$1ayME2akg/2oV3WeFiQ2u.D1D4OD5ssgqVy.iMRBt.TkjoisTsbjG');
 INSERT INTO teacher (userID) 
 VALUES (LAST_INSERT_ID());
 
@@ -175,7 +186,7 @@ VALUES
 ('Cloud Computing', 'lecture', 'W04IST-SI5023L', 2024, 2, '305a', 'thursday', '09:00', 2),
 ('Cybersecurity', 'project', 'W04IST-SI4090P', 2024, 2, '307b', 'monday', '17:00', 3);
 
--- Enroll students into multiple classes
+
 INSERT INTO studentsInClasses (classID, studentID) 
 VALUES 
 (4, 3), (3, 1), (5, 1), (2, 2), (10, 3), (4, 2), (3, 3), (8, 2), (9, 1), (10, 2),
@@ -191,30 +202,32 @@ VALUES
 (1, 1), (2, 2), (3, 1), (4, 2), (5, 1), (6, 2), (7, 1), (8, 2), (9, 1), (10, 2);
 
 
+INSERT INTO ClassSession (classID, sessionDate, sessionStartTime, sessionEndTime)
+VALUES
+(1, '2024-12-10', '09:00', '10:30'), (1, '2024-12-17', '09:00', '10:30'), (1, '2024-12-24', '09:00', '10:30'),
+(2, '2024-12-11', '13:00', '14:30'), (2, '2024-12-18', '13:00', '14:30'), (2, '2024-12-25', '13:00', '14:30'),
+(3, '2024-12-12', '10:00', '11:30'), (3, '2024-12-19', '10:00', '11:30'), (3, '2024-12-26', '10:00', '11:30'),
+(4, '2024-12-13', '15:00', '16:30'), (4, '2024-12-20', '15:00', '16:30'), (4, '2024-12-27', '15:00', '16:30'),
+(5, '2024-12-14', '11:00', '12:30'), (5, '2024-12-21', '11:00', '12:30'), (5, '2024-12-28', '11:00', '12:30'),
+(6, '2024-12-15', '14:00', '15:30'), (6, '2024-12-22', '14:00', '15:30'), (6, '2024-12-29', '14:00', '15:30'),
+(7, '2024-12-16', '08:00', '09:30'), (7, '2024-12-23', '08:00', '09:30'), (7, '2024-12-30', '08:00', '09:30'),
+(8, '2024-12-17', '16:00', '17:30'), (8, '2024-12-24', '16:00', '17:30'), (8, '2024-12-31', '16:00', '17:30'),
+(9, '2024-12-18', '09:00', '10:30'), (9, '2024-12-25', '09:00', '10:30'), (9, '2025-01-01', '09:00', '10:30'),
+(10, '2024-12-19', '17:00', '18:30'), (10, '2024-12-26', '17:00', '18:30'), (10, '2025-01-02', '17:00', '18:30');
 
--- Add attendance records
-INSERT INTO attendanceRecords (classID, studentID, date, time, status) 
-VALUES 
+
+INSERT INTO attendanceRecords (classSessionID, studentID, date, time, status)
+VALUES
 (1, 1, '2024-12-10', '09:05:00', 1), (1, 2, '2024-12-10', '09:05:00', 2),
-(2, 1, '2024-12-11', '13:00:00', 3), (2, 2, '2024-12-11', '13:00:00', 1),
-(3, 1, '2024-12-12', '10:05:00', 4), (3, 3, '2024-12-12', '10:05:00', 1),
-(4, 2, '2025-01-13', '15:05:00', 1), (4, 3, '2024-12-13', '15:10:00', 2),
-(5, 1, '2024-12-14', '11:00:00', 3), (5, 2, '2024-12-14', '11:00:00', 1),
-(6, 1, '2024-12-15', '14:10:00', 1), (6, 3, '2024-12-15', '14:00:00', 4),
-(7, 2, '2024-12-16', '08:00:00', 2), (7, 3, '2024-12-16', '08:05:00', 3),
-(8, 1, '2024-12-17', '16:00:00', 1), (8, 2, '2024-12-17', '16:05:00', 4),
-(9, 1, '2024-12-18', '09:10:00', 2), (9, 3, '2024-12-18', '09:00:00', 1),
-(10, 2, '2024-12-19', '17:00:00', 1), (10, 3, '2024-12-19', '17:05:00', 3),
-(1, 1, '2025-01-10', '09:05:00', 1), (1, 2, '2025-01-10', '09:05:00', 2),
-(2, 1, '2025-01-11', '13:00:00', 3), (2, 2, '2025-01-11', '13:00:00', 1),
-(3, 1, '2025-01-12', '10:05:00', 4), (3, 3, '2025-01-12', '10:05:00', 1),
-(4, 2, '2025-01-13', '15:05:00', 1), (4, 3, '2025-01-13', '15:10:00', 2),
-(5, 1, '2025-01-14', '11:00:00', 3), (5, 2, '2025-01-14', '11:00:00', 1),
-(6, 1, '2025-01-15', '14:10:00', 1), (6, 3, '2025-01-15', '14:00:00', 4),
-(7, 2, '2025-01-16', '08:00:00', 2), (7, 3, '2025-01-16', '08:05:00', 3),
-(8, 1, '2025-01-17', '16:00:00', 1), (8, 2, '2025-01-17', '16:05:00', 4),
-(9, 1, '2025-01-18', '09:10:00', 2), (9, 3, '2025-01-18', '09:00:00', 1),
-(10, 2, '2025-01-19', '17:00:00', 1), (10, 3, '2025-01-19', '17:05:00', 3);
+(4, 1, '2024-12-11', '13:00:00', 3), (4, 2, '2024-12-11', '13:00:00', 1),
+(7, 1, '2024-12-12', '10:05:00', 4), (7, 3, '2024-12-12', '10:05:00', 1),
+(10, 2, '2024-12-13', '15:05:00', 1), (10, 3, '2024-12-13', '15:10:00', 2),
+(13, 1, '2024-12-14', '11:00:00', 3), (13, 2, '2024-12-14', '11:00:00', 1),
+(16, 1, '2024-12-15', '14:10:00', 1), (16, 3, '2024-12-15', '14:00:00', 4),
+(19, 2, '2024-12-16', '08:00:00', 2), (19, 3, '2024-12-16', '08:05:00', 3),
+(22, 1, '2024-12-17', '16:00:00', 1), (22, 2, '2024-12-17', '16:05:00', 4),
+(25, 1, '2024-12-18', '09:10:00', 2), (25, 3, '2024-12-18', '09:00:00', 1),
+(28, 2, '2024-12-19', '17:00:00', 1), (28, 3, '2024-12-19', '17:05:00', 3);
 
 -- Add excuses for some attendance records
 INSERT INTO Excuse (recordID, status, filePath) 

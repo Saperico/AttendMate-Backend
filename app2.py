@@ -1,11 +1,13 @@
 from flask import Flask, jsonify, request
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 from flask_cors import CORS
-from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 import mysql.connector
+from datetime import datetime, timedelta
+from mail import *
+import pandas as pd
 
 app = Flask(__name__)
 CORS(app)
@@ -64,12 +66,40 @@ def login():
     data = request.json
     email = data.get('email')
     password = data.get('password')
-    user = User.query.filter_by(name=email).first()
+    user = User.query.filter_by(email=email).first()
     if user and bcrypt.check_password_hash(user.password, password):
         isTeacher = getWhetherUserIsTeacher(email)
-        token = create_access_token(identity=email, expires_delta=datetime.timedelta(days=1))
+        token = create_access_token(identity=email, expires_delta=timedelta(days=1))
         return jsonify({'token': token , 'isTeacher': isTeacher})
     return jsonify({'message': 'Invalid credentials'}), 401
+
+def checkIfStudentEmail(email):
+    return email[0:6].isdigit() and email.endswith('@student.pwr.edu.pl')
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    email = data.get('email')
+    #check if email already exists
+
+    db_user = User.query.filter_by(email=email).first()
+    if db_user:
+        return jsonify({'message': 'User already exists'}), 400
+
+    if not checkIfStudentEmail(email):
+        if(email.endswith('@pwr.edu.pl')):
+            #create a teacher account
+            user = User(name=data.get('name'), email=email, password=bcrypt.generate_password_hash(data.get('password')).decode('utf-8'))
+            
+    user = User.query.filter_by(email=email).first()
+    if user and user.password == "NULL":
+        password = generate_password()
+        user.password = bcrypt.generate_password_hash(password).decode('utf-8')
+        db.session.commit()
+        send_email(email, password)
+        return jsonify({'message': 'Password has been sent to your email'})
+    else :
+        return jsonify({'message': 'User already has a password'}), 400
 
 
 def get_db_connection():
@@ -101,7 +131,8 @@ def get_attendance():
     cursor.execute("""SELECT DATE_FORMAT(CONCAT(attendanceRecords.date, ' ', attendanceRecords.time), %s)  as formattedDate,
                     class.subjectName, student.studentNumber, attendanceRecords.status, attendanceRecords.date
                     FROM attendanceRecords
-                    JOIN class ON class.classID = attendanceRecords.classID
+                    join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+                    JOIN class ON class.classID = ClassSession.classID
                     JOIN student ON student.studentID = attendanceRecords.studentID""", (date_format,))
     results = cursor.fetchall()
 
@@ -119,47 +150,67 @@ def get_attendance():
 def get_classes():
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""SELECT subjectNumber, subjectName FROM class""")
+    cursor.execute("""SELECT classID, subjectName, subjectNumber, year, semester, room, day, time FROM class""")
     results = cursor.fetchall()
+
+    for row in results:
+        if isinstance(row['day'], datetime):
+            row['day'] = row['day'].strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(row['time'], timedelta):
+            row['time'] = str(row['time'])
+
     cursor.close()
     connection.close()
     return jsonify(results)
+    
 
 @app.route('/api/students/<subject_number>', methods=['GET'])
 def get_students_by_class(subject_number):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT 
-            student.studentNumber,
-            student.studentID,
-            user.name, 
-            user.lastName,
-            COALESCE(attendance.absences, 0) AS absences
-        FROM student
-        JOIN user ON student.userID = user.userID
-        JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
-        JOIN class ON studentsInClasses.classID = class.classID
-        LEFT JOIN (
-            SELECT 
-                ar.studentID, 
-                COUNT(*) AS absences 
-            FROM attendanceRecords ar
-            JOIN attendanceStatus ats ON ar.status = ats.attendanceID
-            JOIN studentsInClasses ON ar.studentID = studentsInClasses.studentID
-            JOIN class ON studentsInClasses.classID = class.classID
-            WHERE ats.status = 'absent'
-            AND class.subjectNumber = %s
-            AND ar.classID = class.classID
-            GROUP BY ar.studentID
-        ) attendance ON student.studentID = attendance.studentID
-        WHERE class.subjectNumber = %s;
-        """, (subject_number, subject_number))
+    cursor.execute("""SELECT 
+    student.studentNumber, 
+    user.name, 
+    user.lastName, 
+    COUNT(CASE WHEN attendanceRecords.status = 2 THEN 1 END) AS absences
+FROM student 
+JOIN user ON student.userID = user.userID
+JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
+JOIN class ON studentsInClasses.classID = class.classID
+LEFT JOIN attendanceRecords ON student.studentID = attendanceRecords.studentID 
+    AND class.classID = attendanceRecords.classSessionID
+WHERE class.subjectNumber = %s
+GROUP BY student.studentNumber, user.name, user.lastName;""", (subject_number,))
     results = cursor.fetchall()
     cursor.close()
     connection.close()
     return jsonify(results)
 
+@app.route('/api/students_table/<subject_number>', methods=['GET'])
+def get_students_table(subject_number):
+    query = """
+    SELECT 
+        student.studentNumber,
+        ClassSession.sessionDate,
+    COALESCE(attendanceStatus.status, "absent") as "status"
+    FROM student
+    JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
+    JOIN class ON studentsInClasses.classID = class.classID
+    JOIN ClassSession ON class.classID = ClassSession.classID
+    LEFT JOIN attendanceRecords ON student.studentID = attendanceRecords.studentID 
+        AND ClassSession.sessionID = attendanceRecords.classSessionID
+    LEFT JOIN attendanceStatus ON attendanceRecords.status = attendanceStatus.attendanceID
+    WHERE class.subjectNumber = %s
+    """
+    # Use parameterized query to safely pass subject_number
+    df = pd.read_sql(query, engine, params=(subject_number,))
+    
+    # Pivot the data
+    pivot_table = df.pivot(index='studentNumber', columns='sessionDate', values='status')
+    
+    # Convert the pivot table to JSON and return
+    return pivot_table.to_json()
+    
 @app.route('/api/class/<subject_number>', methods=['GET'])
 def get_class_by_number(subject_number):
     print(f"ClassPage: Received subject_number: {subject_number}")
@@ -180,13 +231,13 @@ def get_class_by_number(subject_number):
     connection.close()
     return jsonify(result)
 
-@app.route('/api/student/<student_number>', methods=['GET'])
-def get_student_by_number(student_number):
+@app.route('/api/student/<email>', methods=['GET'])
+def get_student_by_email(email):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
     cursor.execute("""SELECT user.name as name, user.lastName as lastName FROM student
                    JOIN user ON student.userID = user.userID
-                   WHERE student.studentNumber = %s""", (student_number,))
+                   WHERE user.email = %s""", (email,))
     result = cursor.fetchone()
     cursor.close()
     connection.close()
@@ -202,7 +253,8 @@ def get_attendance_by_class_and_student(subject_number, student_number):
     cursor.execute("""SELECT DATE_FORMAT(CONCAT(attendanceRecords.date, ' ', attendanceRecords.time), %s)  as date, attendanceStatus.status as status
                    FROM attendanceRecords JOIN attendanceStatus
                    ON attendanceRecords.status = attendanceStatus.attendanceID
-                   JOIN class ON attendanceRecords.classID = class.classID
+                   join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+                   JOIN class ON class.classID = ClassSession.classID
                    JOIN student ON attendanceRecords.studentID = student.studentID
                    WHERE student.studentNumber = %s
                    AND class.subjectNumber = %s""", (date_format, student_number, subject_number))
@@ -227,7 +279,8 @@ def get_late_time(subject_number, student_number):
             END
         ) AS lateTime
         FROM attendanceRecords
-        JOIN class ON class.classID = attendanceRecords.classID
+        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+        JOIN class ON class.classID = ClassSession.classID
         JOIN student ON student.studentID = attendanceRecords.studentID
         JOIN attendanceStatus ON attendanceStatus.attendanceID = attendanceRecords.status
         WHERE class.subjectNumber = %s AND student.studentNumber = %s
@@ -243,7 +296,8 @@ def get_late_time(subject_number, student_number):
             COUNT(CASE WHEN attendanceStatus.status IN ('absent', 'excused') THEN 1 END) AS missedClasses,
             COUNT(CASE WHEN attendanceStatus.status = 'absent' THEN 1 END) As timesUnexcused
         FROM attendanceRecords
-        JOIN class ON class.classID = attendanceRecords.classID
+        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+        JOIN class ON class.classID = ClassSession.classID
         JOIN student ON student.studentID = attendanceRecords.studentID
         JOIN attendanceStatus 
         ON attendanceStatus.attendanceID = attendanceRecords.status
@@ -320,7 +374,8 @@ def update_attendance():
     # check if row for this class, student and day already exists
     cursor.execute("""
         SELECT * FROM attendanceRecords
-        JOIN class ON attendanceRecords.classID = class.classID
+        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+        JOIN class ON class.classID = ClassSession.classID
         JOIN student ON attendanceRecords.studentID = student.studentID
         WHERE class.subjectNumber = %s
         AND student.studentNumber = %s
@@ -334,7 +389,8 @@ def update_attendance():
     if len(rows) == 1: # update row
         cursor.execute("""
             UPDATE attendanceRecords
-            JOIN class ON attendanceRecords.classID = class.classID
+            join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+            JOIN class ON class.classID = ClassSession.classID
             JOIN student ON attendanceRecords.studentID = student.studentID
             JOIN attendanceStatus ON attendanceStatus.status = %s
             SET attendanceRecords.status = attendanceStatus.attendanceID,
@@ -385,7 +441,8 @@ def delete_attendance_record():
 
     cursor.execute("""
         DELETE attendanceRecords FROM attendanceRecords
-        JOIN class ON attendanceRecords.classID = class.classID
+        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
+        JOIN class ON class.classID = ClassSession.classID
         JOIN student ON student.studentID = attendanceRecords.studentID
         WHERE student.studentNumber = %s 
         AND class.subjectNumber = %s 
