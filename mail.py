@@ -46,5 +46,3 @@ def generate_password(length=12):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     password = ''.join(random.choices(characters, k=length))
     return 
-
-send_email("sapijaszkoeryk@gmail.com", "message")
