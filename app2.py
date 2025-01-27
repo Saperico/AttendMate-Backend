@@ -80,18 +80,11 @@ def checkIfStudentEmail(email):
 def register():
     data = request.json
     email = data.get('email')
-    #check if email already exists
 
-    db_user = User.query.filter_by(email=email).first()
-    if db_user:
-        return jsonify({'message': 'User already exists'}), 400
-
-    if not checkIfStudentEmail(email):
-        if(email.endswith('@pwr.edu.pl')):
-            #create a teacher account
-            user = User(name=data.get('name'), email=email, password=bcrypt.generate_password_hash(data.get('password')).decode('utf-8'))
-            
     user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    
     if user and user.password == "NULL":
         password = generate_password()
         user.password = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -99,9 +92,21 @@ def register():
         send_email(email, password)
         return jsonify({'message': 'Password has been sent to your email'})
     else :
-        return jsonify({'message': 'User already has a password'}), 400
-
-
+        return jsonify({'message': 'User already has a password, check your email'}), 400
+    
+@app.route('/change-password', methods=['POST'])
+def change_password():
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    user = User.query.filter_by(email=email).first()
+    if user:
+        user.password = bcrypt.generate_password_hash(password).decode('utf-8')
+        db.session.commit()
+        return jsonify({'message': 'Password has been updated'})
+    return jsonify({'message': 'User not found'}), 404
+    
+    
 def get_db_connection():
     connection = mysql.connector.connect(
         host='localhost',
@@ -243,6 +248,20 @@ def get_student_by_email(email):
     connection.close()
     if result is None:
         return jsonify({"error": "Student not found"}), 404
+    return jsonify(result)
+
+@app.route('/api/teacher/<email>', methods=['GET'])
+def get_teacher_by_email(email):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""SELECT user.name as name, user.lastName as lastName FROM teacher
+                   JOIN user ON teacher.userID = user.userID
+                   WHERE user.email = %s""", (email,))
+    result = cursor.fetchone()
+    cursor.close()
+    connection.close()
+    if result is None:
+        return jsonify({"error": "Teacher not found"}), 404
     return jsonify(result)
 
 @app.route('/api/class/<subject_number>/student/<student_number>/attendance', methods=['GET'])
@@ -454,6 +473,18 @@ def delete_attendance_record():
     connection.close()
 
     return jsonify({"message": "Status updated successfully"}), 200
+
+@app.route('/protected', methods=['GET'])
+@jwt_required()
+def protected():
+    return jsonify({'message': 'This is a protected route'})
+
+@app.route('/user-details' , methods=['GET'])
+@jwt_required()
+def user_details():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(name=current_user).first()
+    return jsonify({'name': user.name, 'email': user.email})
 
 if __name__ == '__main__':
     app.run(debug=True)
