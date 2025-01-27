@@ -41,6 +41,8 @@ CREATE TABLE class (
     subjectName VARCHAR(100) NOT NULL,
     subjectType ENUM('lecture', 'seminar', 'project', 'lab') NOT NULL,
     subjectNumber VARCHAR(50),
+    subjectType ENUM('lecture', 'seminar', 'project', 'lab') NOT NULL,
+    subjectNumber VARCHAR(50),
     year INT NOT NULL,
     semester TINYINT CHECK (semester IN (1, 2)) NOT NULL,
     room VARCHAR(50),
@@ -126,11 +128,24 @@ VALUES (LAST_INSERT_ID(), 20230002);
 
 INSERT INTO images (studentID, number, path) 
 VALUES (LAST_INSERT_ID(), 1, '/images/students/emilydavis1.jpg');
+VALUES (LAST_INSERT_ID());
+
+-- Insert more students
+INSERT INTO user (name, lastName, email, password) 
+VALUES ('Emily', 'Davis', 'emilydavis@example.com', SHA2('password111', 256));
+
+INSERT INTO student (userID, studentNumber) 
+VALUES (LAST_INSERT_ID(), 20230002);
+
+INSERT INTO images (studentID, number, path) 
+VALUES (LAST_INSERT_ID(), 1, '/images/students/emilydavis1.jpg');
 
 INSERT INTO user (name, lastName, email, password) 
 VALUES ('Michael', 'Wilson', 'michaelwilson@example.com', SHA2('password222', 256));
+VALUES ('Michael', 'Wilson', 'michaelwilson@example.com', SHA2('password222', 256));
 
 INSERT INTO student (userID, studentNumber) 
+VALUES (LAST_INSERT_ID(), 20230003);
 VALUES (LAST_INSERT_ID(), 20230003);
 
 INSERT INTO images (studentID, number, path) 
