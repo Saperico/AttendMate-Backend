@@ -159,6 +159,7 @@ def get_classes():
     results = cursor.fetchall()
 
     for row in results:
+        print(row)
         if isinstance(row['day'], datetime):
             row['day'] = row['day'].strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(row['time'], timedelta):
@@ -168,12 +169,54 @@ def get_classes():
     connection.close()
     return jsonify(results)
     
+@app.route('/api/classes/<is_teacher>/<email>', methods=['GET'])
+def get_classes_by_email(is_teacher, email):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    print("is_teacher: " + is_teacher)
+
+    if(is_teacher.lower() == "true"): # is_teacher is a string of value true, not a boolean (!)
+        cursor.execute("""
+        SELECT class.* FROM class 
+        JOIN teachersInClasses ON class.classID = teachersInClasses.classID
+        JOIN teacher ON teacher.teacherID = teachersInClasses.teacherID
+        JOIN user ON teacher.userID = user.userID
+        WHERE user.email = %s
+        """, (email,))
+        results = cursor.fetchall()
+    else:
+        print("starting query")
+        cursor.execute("""
+        SELECT class.* FROM class
+        JOIN studentsInClasses ON class.classID = studentsInClasses.classID
+        JOIN student ON student.studentID = studentsInClasses.studentID
+        JOIN user ON student.userID = user.userID
+        WHERE user.email = %s
+        """, (email,))
+        results = cursor.fetchall()
+
+    print(email)
+    print(results)
+
+    for row in results:
+        print(row)
+        if isinstance(row['day'], datetime):
+            row['day'] = row['day'].strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(row['time'], timedelta):
+            row['time'] = str(row['time'])
+
+    cursor.close()
+    connection.close()
+    return jsonify(results)
+
 
 @app.route('/api/students/<subject_number>', methods=['GET'])
 def get_students_by_class(subject_number):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""SELECT 
+    cursor.execute("""SELECT
+    student.studentID,
     student.studentNumber, 
     user.name, 
     user.lastName, 
@@ -236,11 +279,28 @@ def get_class_by_number(subject_number):
     connection.close()
     return jsonify(result)
 
+@app.route('/api/student/by-number/<student_number>', methods=['GET'])
+def get_student_by_number(student_number):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""SELECT user.name as name, user.lastName as lastName FROM student
+                   JOIN user ON student.userID = user.userID
+                   WHERE student.studentNumber = %s""", (student_number,))
+    result = cursor.fetchone()
+    cursor.close()
+    connection.close()
+    if result is None:
+        return jsonify({"error": "Student not found"}), 404
+    return jsonify(result)
+
+
+
 @app.route('/api/student/<email>', methods=['GET'])
 def get_student_by_email(email):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""SELECT user.name as name, user.lastName as lastName FROM student
+    cursor.execute("""SELECT user.name as name, user.lastName as lastName,
+                   student.studentNumber as studentNumber FROM student
                    JOIN user ON student.userID = user.userID
                    WHERE user.email = %s""", (email,))
     result = cursor.fetchone()
@@ -419,19 +479,23 @@ def update_attendance():
             AND attendanceRecords.date = %s
         """, (status, time, student_number, subject_number, formatted_date))
 
-    else: # create new entry
+    else:  # create new entry
         cursor.execute("""
-        INSERT INTO attendanceRecords (classID, studentID, date, time, status)
+        INSERT INTO attendanceRecords (classSessionID, studentID, date, time, status)
         VALUES (
-        (SELECT class.classID from class WHERE class.subjectNumber = %s),
-        (SELECT student.studentID from student WHERE student.studentNumber = %s),
-        %s,
-        %s,
-        (SELECT attendanceStatus.attendanceID from attendanceStatus 
-            WHERE attendanceStatus.status = %s)
+            (SELECT sessionID 
+             FROM ClassSession 
+             WHERE classID = (SELECT classID FROM class WHERE subjectNumber = %s)
+               AND sessionDate = %s
+               AND sessionStartTime <= %s 
+               AND sessionEndTime >= %s),
+            (SELECT studentID FROM student WHERE studentNumber = %s),
+            %s,
+            %s,
+            (SELECT attendanceID FROM attendanceStatus WHERE status = %s)
         )
-        """, (subject_number, student_number, formatted_date, time, status))
-        
+        """, (subject_number, formatted_date, time, time, student_number, formatted_date, time, status))
+
         if cursor.rowcount == 0:
             return jsonify({"message": "Failed to add row"}), 500
             
