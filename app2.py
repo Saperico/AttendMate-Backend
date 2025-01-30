@@ -4,10 +4,14 @@ from flask_cors import CORS
 from sqlalchemy import create_engine
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
+from flask import send_from_directory
 import mysql.connector
 from datetime import datetime, timedelta
 from mail import *
 import pandas as pd
+from werkzeug.utils import secure_filename
+import os
+import uuid
 
 app = Flask(__name__)
 CORS(app)
@@ -26,6 +30,15 @@ engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
 jwt = JWTManager(app)
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
+
+
+# defines for file upload (doctors note)
+DN_UPLOAD_FOLDER = os.path.abspath('doctors_notes')
+DN_ALLOWED_EXTENSIONS = {'pdf', 'png'}
+app.config['DN_UPLOAD_FOLDER'] = DN_UPLOAD_FOLDER
+
+if not os.path.exists(DN_UPLOAD_FOLDER):
+    os.makedirs(DN_UPLOAD_FOLDER)
 
 
 class User (db.Model):
@@ -150,6 +163,40 @@ def get_attendance():
     cursor.close()
     connection.close()
     return results
+
+@app.route('/api/class-sessions', methods=['GET'])
+def get_class_sessions():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    date_format = '%d.%m.%YT%H:%i'
+    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', ClassSession.sessionStartTime), %s) as formattedStartDate,
+                    DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', ClassSession.sessionEndTime), %s) as formattedEndDate,
+                    ClassSession.sessionDate, class.subjectName
+                    FROM ClassSession 
+                    JOIN class ON class.classID = ClassSession.classID""", (date_format,date_format))
+    results = cursor.fetchall()
+
+    for row in results:
+        if isinstance(row['formattedStartDate'], datetime):
+            row['formattedStartDate'] = row['formattedStartDate'].strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(row['formattedEndDate'], datetime):
+            row['formattedEndDate'] = row['formattedEndDate'].strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(row['sessionDate'], timedelta):
+            row['sessionDate'] = str(row['sessionDate'])
+
+    cursor.close()
+    connection.close()
+    return results
+
+@app.route('/api/excuses', methods=['GET'])
+def get_excuses():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""SELECT * FROM Excuse""")
+    results = cursor.fetchall()
+    cursor.close()
+    connection.close()
+    return jsonify(results)
 
 @app.route('/api/classes', methods=['GET'])
 def get_classes():
@@ -480,21 +527,64 @@ def update_attendance():
         """, (status, time, student_number, subject_number, formatted_date))
 
     else:  # create new entry
+
+        # check if there is a session on this day
+        cursor.execute("""
+            SELECT sessionID, sessionStartTime, sessionEndTime
+            FROM ClassSession
+            WHERE classID = (SELECT classID FROM class WHERE subjectNumber = %s)
+              AND sessionDate = %s
+        """, (subject_number, formatted_date))  
+        session = cursor.fetchone()
+
+        if session:
+            session_id = session['sessionID']
+            start_time = session['sessionStartTime']
+            end_time = session['sessionEndTime']
+
+            # Time falls within the session's time range
+            if start_time <= time <= end_time:
+                pass  # Valid session, proceed with attendance
+
+            # Time is outside the session's time range
+            else:
+                print("Time does not match the existing session. Creating a new session...")
+                cursor.execute("""
+                INSERT INTO ClassSession (classID, sessionDate, sessionStartTime, sessionEndTime)
+                VALUES (
+                    (SELECT classID FROM class WHERE subjectNumber = %s),
+                    %s,
+                    %s,
+                    ADDTIME(%s, '01:00:00')  -- Example duration: 1 hour
+                )
+                """, (subject_number, formatted_date, time, time))
+                session_id = cursor.lastrowid # lastrowid gives primary key id of last inserted row
+        else:
+            # No session exists for the given day, create one
+            print("No session found. Creating a new session...")
+            cursor.execute("""
+            INSERT INTO ClassSession (classID, sessionDate, sessionStartTime, sessionEndTime)
+            VALUES (
+                (SELECT classID FROM class WHERE subjectNumber = %s),
+                %s,
+                %s,
+                ADDTIME(%s, '01:00:00')  -- Example duration: 1 hour
+            )
+            """, (subject_number, formatted_date, time, time))
+            session_id = cursor.lastrowid
+
+        # Step 3: Insert the attendance record
         cursor.execute("""
         INSERT INTO attendanceRecords (classSessionID, studentID, date, time, status)
         VALUES (
-            (SELECT sessionID 
-             FROM ClassSession 
-             WHERE classID = (SELECT classID FROM class WHERE subjectNumber = %s)
-               AND sessionDate = %s
-               AND sessionStartTime <= %s 
-               AND sessionEndTime >= %s),
+            %s,
             (SELECT studentID FROM student WHERE studentNumber = %s),
             %s,
             %s,
             (SELECT attendanceID FROM attendanceStatus WHERE status = %s)
         )
-        """, (subject_number, formatted_date, time, time, student_number, formatted_date, time, status))
+        """, (session_id, student_number, formatted_date, time, status))
+            
 
         if cursor.rowcount == 0:
             return jsonify({"message": "Failed to add row"}), 500
@@ -549,6 +639,201 @@ def user_details():
     current_user = get_jwt_identity()
     user = User.query.filter_by(name=current_user).first()
     return jsonify({'name': user.name, 'email': user.email})
+
+
+# doctors notes
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in DN_ALLOWED_EXTENSIONS
+
+def generate_unique_filename(filename):
+    extension = filename.rsplit('.', 1)[1].lower()  # Get file extension
+    unique_id = uuid.uuid4().hex
+    new_filename = f"{unique_id}_{filename}"
+    return new_filename
+
+@app.route('/upload-file', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'message': 'No file part'}), 400
+    
+    file = request.files['file']
+    subject_number = request.form['subjectNumber']
+    student_number = request.form['studentNumber']
+    date = request.form['date']
+
+    
+    if file.filename == '':
+        return jsonify({'message': 'No selected file'}), 400
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        unique_filename = generate_unique_filename(filename)
+        filepath = os.path.join(app.config['DN_UPLOAD_FOLDER'], unique_filename)
+
+        print(f"Saving file to: {filepath}")
+        
+        file.save(filepath)
+        
+        # Insert the file path into the database
+        
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        # check if attendance Record for given date, student and class exists
+        cursor.execute("""SELECT attendanceRecords.recordID FROM attendanceRecords 
+            JOIN ClassSession on ClassSession.sessionID = attendanceRecords.classSessionID
+            JOIN class on class.classID = ClassSession.classID
+            JOIN student on student.studentID = attendanceRecords.studentID
+            WHERE student.studentNumber = %s
+            AND class.subjectNumber = %s
+            AND attendanceRecords.date = %s
+        """, (student_number, subject_number, date ))
+
+        result = cursor.fetchone()
+        if result is None:
+            return jsonify({'message': 'Invalid date'}), 400
+            
+
+        cursor.execute("""
+            INSERT INTO Excuse(recordID, status, filePath)
+            VALUES (
+            (SELECT attendanceRecords.recordID FROM attendanceRecords 
+            JOIN ClassSession on ClassSession.sessionID = attendanceRecords.classSessionID
+            JOIN class on class.classID = ClassSession.classID
+            JOIN student on student.studentID = attendanceRecords.studentID
+            WHERE student.studentNumber = %s
+            AND class.subjectNumber = %s
+            AND attendanceRecords.date = %s),
+            'sent',
+            %s)
+        """, (student_number, subject_number, date, unique_filename ))
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({'message': 'File uploaded and recorded successfully!'}), 200
+    
+    return jsonify({'message': 'Invalid file type'}), 400
+
+
+@app.route('/list-files', methods=['GET'])
+def list_files():
+    
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    
+    # if user is student, return null
+    user_mail = request.args.get('userMail')
+    if getWhetherUserIsTeacher(user_mail) == False:
+        return null
+
+    # select excuses with status = sent and from classes this teacher has
+    cursor.execute("""
+        SELECT 
+            Excuse.excuseID,
+            COALESCE(class.subjectName, 'Unknown') AS subjectName, 
+            COALESCE(user_student.name, 'Unknown') AS name, 
+            COALESCE(user_student.lastName, 'Unknown') AS lastName, 
+            COALESCE(attendanceRecords.date, 'Unknown') AS date,
+            Excuse.filePath
+        FROM Excuse
+        JOIN attendanceRecords ON attendanceRecords.recordID = Excuse.recordID
+        JOIN ClassSession ON ClassSession.sessionID = attendanceRecords.classSessionID
+        JOIN class ON class.classID = ClassSession.classID
+        JOIN student ON student.studentID = attendanceRecords.studentID
+        JOIN user AS user_student ON user_student.userID = student.userID
+        JOIN teachersInClasses ON teachersInClasses.classID = class.classID
+        JOIN teacher ON teachersInClasses.teacherId = teacher.teacherID
+        JOIN user AS user_teacher ON user_teacher.userID = teacher.userID
+        WHERE Excuse.status = %s
+        AND user_teacher.email = %s
+    """, ('sent', user_mail))
+        
+
+    results = cursor.fetchall()
+    print(results)
+
+    filtered_results = []
+    for row in results:
+        excuseId, subjectName, name, lastName, date, filePath = row
+
+        if filePath and os.path.exists(os.path.join(app.config['DN_UPLOAD_FOLDER'], filePath)):  # Only include if file exists
+            filtered_results.append({
+                "excuseId": excuseId,
+                "subjectName": subjectName,
+                "name": name,
+                "lastName": lastName,
+                "date": date,
+                "filePath": filePath
+            })
+
+    
+    cursor.close()
+    connection.close()
+    
+    return jsonify(filtered_results)
+
+
+@app.route('/doctors_note/decide/<operation>', methods=['POST'])
+def accept_reject_note(operation):
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    data = request.get_json()
+    excuseId = data['excuseId']
+
+    cursor.execute("SELECT status FROM Excuse WHERE Excuse.excuseId = %s", (excuseId,))
+    result = cursor.fetchone();
+    if result is None or result[0] != 'sent':
+        print("Doctors note state != 'sent'")  
+        return jsonify({'message': 'State of doctors note is not equal to sent'}), 400
+
+    if operation == 'accept':
+        cursor.execute("""
+        UPDATE Excuse
+        SET status = 'accepted'
+        WHERE excuseId = %s;
+        """, (excuseId,))
+
+        cursor.execute("""
+        UPDATE attendanceRecords SET attendanceRecords.status = (
+        SELECT attendanceID FROM attendanceStatus WHERE attendanceStatus.status = %s
+        )
+        WHERE attendanceRecords.recordID = (
+        SELECT recordID 
+        FROM Excuse 
+        WHERE Excuse.excuseId = %s
+        )""", ('excused', excuseId))
+        
+    elif operation == 'reject':
+        cursor.execute("""
+        UPDATE Excuse
+        SET status = 'rejected'
+        WHERE excuseId = %s;
+        """, (excuseId,))
+
+    else:
+        print("[accept_reject_note] unknown operation: " + operation)
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return jsonify({'message': 'Unknown operation'}), 400
+
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+    return jsonify({'message': 'Excuse status updated successfully'}), 200
+
+
+@app.route('/doctors_notes/<filename>', methods=['GET'])
+def serve_file(filename):
+    return send_from_directory(app.config['DN_UPLOAD_FOLDER'], filename)
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
