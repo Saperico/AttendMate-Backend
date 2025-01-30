@@ -305,6 +305,56 @@ def get_students_table(subject_number):
     
     # Convert the pivot table to JSON and return
     return pivot_table.to_json()
+
+
+@app.route('/api/students/current-class', methods=['GET'])
+def get_students_by_current_class():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    curr_date = datetime.today().strftime('%Y-%m-%d')
+    curr_time = datetime.now().strftime('%H:%M:%S')
+
+    # get currently happening class
+    cursor.execute("""
+    SELECT ClassSession.sessionID AS sessionID FROM ClassSession
+    WHERE ClassSession.sessionDate = %s
+    AND ClassSession.sessionStartTime <= %s
+    AND ClassSession.sessionEndTime >= %s
+    LIMIT 1
+    """,(curr_date, curr_time, curr_time) )
+    result = cursor.fetchone()
+
+    if result is None:
+        return jsonify(result)
+
+    # get students and status from that class
+    cursor.execute("""
+    SELECT 
+        class.subjectName,
+        student.studentNumber, 
+        user.name, 
+        user.lastName, 
+        COALESCE(attendanceStatus.status, 'absent') AS status
+    FROM studentsInClasses 
+    JOIN student ON studentsInClasses.studentId = student.studentID
+    JOIN user ON user.userId = student.userID
+    JOIN class ON studentsInClasses.classID = class.classID
+    JOIN ClassSession ON class.classID = ClassSession.classID
+    LEFT JOIN attendanceRecords 
+        ON ClassSession.sessionID = attendanceRecords.classSessionID 
+        AND attendanceRecords.studentID = student.studentID
+    LEFT JOIN attendanceStatus ON attendanceStatus.attendanceId = attendanceRecords.status
+    WHERE ClassSession.sessionID = %s
+    """, (result['sessionID'],))
+
+
+    students = cursor.fetchall()
+
+    cursor.close()
+    connection.close()
+    return jsonify(students)
+
     
 @app.route('/api/class/<subject_number>', methods=['GET'])
 def get_class_by_number(subject_number):
@@ -489,7 +539,7 @@ def update_attendance():
         return jsonify({"message": "subjectNumber, studentNumber and status are required"}), 400
 
     connection = get_db_connection()
-    cursor = connection.cursor()
+    cursor = connection.cursor(dictionary=True)
 
     # convert date back
     date_obj = datetime.strptime(date, '%d.%m.%Y')
@@ -543,7 +593,9 @@ def update_attendance():
             end_time = session['sessionEndTime']
 
             # Time falls within the session's time range
-            if start_time <= time <= end_time:
+            time_obj = datetime.strptime(time, '%H:%M:%S').time()
+            time_delta = timedelta(hours=time_obj.hour, minutes=time_obj.minute, seconds=time_obj.second)
+            if start_time <= time_delta <= end_time:
                 pass  # Valid session, proceed with attendance
 
             # Time is outside the session's time range
@@ -727,7 +779,7 @@ def list_files():
     # if user is student, return null
     user_mail = request.args.get('userMail')
     if getWhetherUserIsTeacher(user_mail) == False:
-        return null
+        return jsonify(None)
 
     # select excuses with status = sent and from classes this teacher has
     cursor.execute("""
