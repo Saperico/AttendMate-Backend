@@ -87,7 +87,14 @@ def login():
     return jsonify({'message': 'Invalid credentials'}), 401
 
 def checkIfStudentEmail(email):
-    return email[0:6].isdigit() and email.endswith('@student.pwr.edu.pl')
+    return email[0:6].isdigit() and email.endswith('@student.pwr.edu.pl') or email in ['emilydavis@example.com','michaelwilson@example.com',
+'davidmiller@example.com',
+'emmajohnson@example.com',
+'oliviabrown@example.com',
+'liamsmith@example.com',
+'sophiadavis@example.com',
+'noahwilson@example.com',
+'isabellagarcia@example.com']
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -377,17 +384,40 @@ def get_class_by_number(subject_number):
     return jsonify(result)
 
 @app.route('/api/student/by-number/<student_number>', methods=['GET'])
+@jwt_required()  # Requires a valid JWT token
 def get_student_by_number(student_number):
+    # Get the logged-in user's email from the token
+    email = get_jwt_identity()
+
+    # Fetch student data based on email
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""SELECT user.name as name, user.lastName as lastName FROM student
-                   JOIN user ON student.userID = user.userID
-                   WHERE student.studentNumber = %s""", (student_number,))
-    result = cursor.fetchone()
+    cursor.execute("""SELECT student.studentNumber FROM student 
+                      JOIN user ON student.userID = user.userID 
+                      WHERE user.email = %s""", (email,))
+    student = cursor.fetchone()
+    
     cursor.close()
     connection.close()
+
+    # Ensure the logged-in student can only access their own data
+    if not student or str(student["studentNumber"]) != str(student_number):
+        return jsonify({"error": "Unauthorized access"}), 403
+
+    # Fetch and return student details
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("""SELECT user.name, user.lastName FROM student
+                      JOIN user ON student.userID = user.userID
+                      WHERE student.studentNumber = %s""", (student_number,))
+    result = cursor.fetchone()
+
+    cursor.close()
+    connection.close()
+
     if result is None:
         return jsonify({"error": "Student not found"}), 404
+
     return jsonify(result)
 
 
@@ -440,9 +470,24 @@ def get_attendance_by_class_and_student(subject_number, student_number):
     return jsonify(results)
 
 @app.route('/api/class/<subject_number>/student/<student_number>/statistics', methods=['GET'])
+@jwt_required()
 def get_late_time(subject_number, student_number):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
+
+    email = get_jwt_identity()
+    #check if its a teacher
+
+    if(checkIfStudentEmail(email)):
+        cursor.execute("""SELECT student.studentNumber FROM student 
+                        JOIN user ON student.userID = user.userID 
+                        WHERE user.email = %s""", (email,))
+        student = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        if not student or str(student["studentNumber"]) != str(student_number):
+            return jsonify({"error": "Unauthorized access"}), 403
 
     # total late time in seconds
     # exclude negative times from the addition (if student was too early)
