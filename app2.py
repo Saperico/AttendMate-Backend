@@ -7,7 +7,7 @@ from flask_bcrypt import Bcrypt
 from flask import send_from_directory
 import mysql.connector
 from datetime import datetime, timedelta
-from mail import *
+from mail import send_email, generate_password
 import pandas as pd
 from werkzeug.utils import secure_filename
 import os
@@ -115,13 +115,13 @@ def login():
 
 def checkIfStudentEmail(email):
     return email[0:6].isdigit() and email.endswith('@student.pwr.edu.pl') or email in ['emilydavis@example.com','michaelwilson@example.com',
-'davidmiller@example.com',
-'emmajohnson@example.com',
-'oliviabrown@example.com',
-'liamsmith@example.com',
-'sophiadavis@example.com',
-'noahwilson@example.com',
-'isabellagarcia@example.com']
+    'davidmiller@example.com',
+    'emmajohnson@example.com',
+    'oliviabrown@example.com',
+    'liamsmith@example.com',
+    'sophiadavis@example.com',
+    'noahwilson@example.com',
+    'isabellagarcia@example.com']
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -142,16 +142,28 @@ def register():
         return jsonify({'message': 'User already has a password, check your email'}), 400
     
 @app.route('/change-password', methods=['POST'])
+@jwt_required()
 def change_password():
     data = request.json
-    email = data.get('email')
-    password = data.get('password')
+    email = get_jwt_identity()  # Get email from JWT token
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    # Find user in database
     user = User.query.filter_by(email=email).first()
-    if user:
-        user.password = bcrypt.generate_password_hash(password).decode('utf-8')
-        db.session.commit()
-        return jsonify({'message': 'Password has been updated'})
-    return jsonify({'message': 'User not found'}), 404
+
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    # Check if current password is correct
+    if not (user and bcrypt.check_password_hash(user.password, current_password)):
+        return jsonify({'message': 'Current password is incorrect'}), 401
+
+    # Update password
+    user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    db.session.commit()
+
+    return jsonify({'message': 'Password has been updated successfully'})
     
     
 def get_db_connection():
@@ -542,12 +554,12 @@ def get_attendance_by_class_and_student(subject_number, student_number):
             return jsonify({'message': 'Not allowed: You do not teach this class'}), 403
 
     date_format = '%d.%m.%YT%H:%i'
-    cursor.execute("""SELECT DATE_FORMAT(CONCAT(attendanceRecords.date, ' ', attendanceRecords.time), %s)  as date, attendanceStatus.status as status
-                   FROM attendanceRecords JOIN attendanceStatus
-                   ON attendanceRecords.status = attendanceStatus.attendanceID
-                   join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
-                   JOIN class ON class.classID = ClassSession.classID
-                   JOIN student ON attendanceRecords.studentID = student.studentID
+    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date, status
+                   from ClassSession 
+                   left join class on ClassSession.classID = class.classID
+                   left join AttendMate.studentsInClasses sIC on class.classID = sIC.classID
+                   left join AttendMate.attendanceRecords aR on ClassSession.sessionID = aR.classSessionID
+                   left join student on sIC.studentID = student.studentID
                    WHERE student.studentNumber = %s
                    AND class.subjectNumber = %s""", (date_format, student_number, subject_number))
     results = cursor.fetchall()
@@ -601,33 +613,28 @@ def get_late_time(subject_number, student_number):
     """, (subject_number, student_number, 'late'))
     late_time = cursor.fetchone()
 
-
-    cursor.execute("""
-        SELECT 
-            COUNT(CASE WHEN attendanceStatus.status IN ('late', 'present') THEN 1 END) AS timesInClass,
-            COUNT(CASE WHEN attendanceStatus.status = 'late' THEN 1 END) AS timesLate,
-            COUNT(CASE WHEN attendanceStatus.status IN ('absent', 'excused') THEN 1 END) AS missedClasses,
-            COUNT(CASE WHEN attendanceStatus.status = 'absent' THEN 1 END) As timesUnexcused
-        FROM attendanceRecords
-        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
-        JOIN class ON class.classID = ClassSession.classID
-        JOIN student ON student.studentID = attendanceRecords.studentID
-        JOIN attendanceStatus 
-        ON attendanceStatus.attendanceID = attendanceRecords.status
-        WHERE class.subjectNumber = %s AND student.studentNumber = %s
-        """, (subject_number, student_number,))
+            # Query to get attendance statistics
+    cursor.execute("""SELECT 
+                    COUNT(CASE WHEN attendanceStatus.status IN ('late', 'present') THEN 1 END) AS timesInClass,
+                    COUNT(CASE WHEN attendanceStatus.status = 'late' THEN 1 END) AS timesLate,
+                    COUNT(CASE WHEN attendanceStatus.status IN ('absent', 'excused') THEN 1 END) AS missedClasses,
+                    COUNT(CASE WHEN attendanceStatus.status = 'absent' THEN 1 END) AS timesUnexcused
+                FROM attendanceRecords
+                JOIN ClassSession ON attendanceRecords.classSessionID = ClassSession.sessionID
+                JOIN class ON class.classID = ClassSession.classID
+                JOIN student ON student.studentID = attendanceRecords.studentID
+                JOIN attendanceStatus ON attendanceStatus.attendanceID = attendanceRecords.status
+                WHERE class.subjectNumber = %s AND student.studentNumber = %s
+            """, (subject_number, student_number,))
     attendance_times = cursor.fetchone()
 
+            # Return results
     result = {
-        'lateTime': late_time['lateTime'],
-        'timesInClass': attendance_times['timesInClass'],
-        'timesLate': attendance_times['timesLate'],
-        'missedClasses': attendance_times['missedClasses'],
-        'timesUnexcused': attendance_times['timesUnexcused']
-    }
-
-    cursor.close()
-    connection.close()
+                'lateTime': late_time['lateTime'] if late_time and late_time['lateTime'] is not None else 0,
+                'timesInClass': attendance_times['timesInClass'] if attendance_times else 0,
+                'timesLate': attendance_times['timesLate'] if attendance_times else 0,
+                'missedClasses': attendance_times['missedClasses'] if attendance_times else 0,
+                'timesUnexcused': attendance_times['timesUnexcused'] if attendance_times else 0}
     return jsonify(result)
     
 
