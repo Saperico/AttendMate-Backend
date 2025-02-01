@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request
-from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity, verify_jwt_in_request
 from flask_cors import CORS
 from sqlalchemy import create_engine
 from flask_sqlalchemy import SQLAlchemy
@@ -73,6 +73,33 @@ class Teacher(db.Model):
 
 def getWhetherUserIsTeacher(email):
     return Teacher.query.join(User).filter(User.email == email).first() is not None
+
+def is_teacher_of_class(subject_number):
+    verify_jwt_in_request()
+    email = get_jwt_identity()  # Get the user's email
+
+    isTeacher = getWhetherUserIsTeacher(email)
+    if not isTeacher:
+        return False  # User is not a teacher
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT class.subjectName FROM class
+    JOIN teachersInClasses ON teachersInClasses.classID = class.classID
+    JOIN teacher ON teacher.teacherId = teachersInClasses.teacherID
+    JOIN user ON user.userID = teacher.userID
+    WHERE user.email = %s
+    AND class.subjectNumber = %s
+    """, (email, subject_number))
+
+    result = cursor.fetchone()
+    cursor.close()
+    connection.close()
+
+    return bool(result)  # True if the user teaches the class, False otherwise
+
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -266,23 +293,47 @@ def get_classes_by_email(is_teacher, email):
 
 
 @app.route('/api/students/<subject_number>', methods=['GET'])
+@jwt_required()
 def get_students_by_class(subject_number):
+    email = get_jwt_identity() # logged in user's email
+
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
+
+
+    # check if teacher teaches selected class
+    cursor.execute("""
+    SELECT class.subjectName FROM class
+    JOIN teachersInClasses ON teachersInClasses.classID = class.classID
+    JOIN teacher ON teacher.teacherId = teachersInClasses.teacherID
+    JOIN user ON user.userID = teacher.userID
+    WHERE user.email = %s
+    AND class.subjectNumber = %s
+    """, (email, subject_number))
+
+    result = cursor.fetchone();
+    print(result)
+
+    if not result:  # if teacher doesn't teach subject, return empty list
+        cursor.close()
+        connection.close()
+        return jsonify([])
+
+    # if teacher teaches subject, return all students in it
     cursor.execute("""SELECT
     student.studentID,
     student.studentNumber, 
     user.name, 
     user.lastName, 
     COUNT(CASE WHEN attendanceRecords.status = 2 THEN 1 END) AS absences
-FROM student 
-JOIN user ON student.userID = user.userID
-JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
-JOIN class ON studentsInClasses.classID = class.classID
-LEFT JOIN attendanceRecords ON student.studentID = attendanceRecords.studentID 
-    AND class.classID = attendanceRecords.classSessionID
-WHERE class.subjectNumber = %s
-GROUP BY student.studentNumber, user.name, user.lastName;""", (subject_number,))
+    FROM student 
+    JOIN user ON student.userID = user.userID
+    JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
+    JOIN class ON studentsInClasses.classID = class.classID
+    LEFT JOIN attendanceRecords ON student.studentID = attendanceRecords.studentID 
+        AND class.classID = attendanceRecords.classSessionID
+    WHERE class.subjectNumber = %s
+    GROUP BY student.studentNumber, user.name, user.lastName;""", (subject_number,))
     results = cursor.fetchall()
     cursor.close()
     connection.close()
@@ -383,6 +434,8 @@ def get_class_by_number(subject_number):
     connection.close()
     return jsonify(result)
 
+
+
 @app.route('/api/student/by-number/<student_number>', methods=['GET'])
 @jwt_required()  # Requires a valid JWT token
 def get_student_by_number(student_number):
@@ -392,17 +445,21 @@ def get_student_by_number(student_number):
     # Fetch student data based on email
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
-    cursor.execute("""SELECT student.studentNumber FROM student 
-                      JOIN user ON student.userID = user.userID 
-                      WHERE user.email = %s""", (email,))
-    student = cursor.fetchone()
+
+    if(checkIfStudentEmail(email)):
+        cursor.execute("""SELECT student.studentNumber FROM student 
+                        JOIN user ON student.userID = user.userID 
+                        WHERE user.email = %s""", (email,))
+        student = cursor.fetchone()
+
+        # Ensure the logged-in student can only access their own data
+        if not student or str(student["studentNumber"]) != str(student_number):
+            cursor.close()
+            connection.close()
+            return jsonify({"error": "Unauthorized access"}), 403
     
     cursor.close()
     connection.close()
-
-    # Ensure the logged-in student can only access their own data
-    if not student or str(student["studentNumber"]) != str(student_number):
-        return jsonify({"error": "Unauthorized access"}), 403
 
     # Fetch and return student details
     connection = get_db_connection()
@@ -451,10 +508,39 @@ def get_teacher_by_email(email):
         return jsonify({"error": "Teacher not found"}), 404
     return jsonify(result)
 
+@app.route('/api/is-teacher-of-class/<subject_number>', methods=['GET'])
+@jwt_required()
+def get_is_valid_teacher(subject_number):
+    is_teacher = is_teacher_of_class(subject_number)
+    return jsonify(is_teacher)
+
 @app.route('/api/class/<subject_number>/student/<student_number>/attendance', methods=['GET'])
+@jwt_required()
 def get_attendance_by_class_and_student(subject_number, student_number):
+    
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
+
+    email = get_jwt_identity()
+    #check if its a teacher
+
+    if(checkIfStudentEmail(email)): # check if student has access
+        cursor.execute("""SELECT student.studentNumber FROM student 
+                        JOIN user ON student.userID = user.userID 
+                        WHERE user.email = %s""", (email,))
+        student = cursor.fetchone()
+        
+
+        if not student or str(student["studentNumber"]) != str(student_number):
+            cursor.close()
+            connection.close()
+            return jsonify({"error": "Unauthorized access"}), 403
+
+    else: # check if teacher has access
+        valid_teacher = is_teacher_of_class(subject_number)
+        if not valid_teacher:
+            return jsonify({'message': 'Not allowed: You do not teach this class'}), 403
+
     date_format = '%d.%m.%YT%H:%i'
     cursor.execute("""SELECT DATE_FORMAT(CONCAT(attendanceRecords.date, ' ', attendanceRecords.time), %s)  as date, attendanceStatus.status as status
                    FROM attendanceRecords JOIN attendanceStatus
@@ -484,10 +570,16 @@ def get_late_time(subject_number, student_number):
                         WHERE user.email = %s""", (email,))
         student = cursor.fetchone()
         
-        cursor.close()
-        connection.close()
+
         if not student or str(student["studentNumber"]) != str(student_number):
+            cursor.close()
+            connection.close()
             return jsonify({"error": "Unauthorized access"}), 403
+
+    else: # check if teacher has access
+        valid_teacher = is_teacher_of_class(subject_number)
+        if not valid_teacher:
+            return jsonify({'message': 'Not allowed: You do not teach this class'}), 403
 
     # total late time in seconds
     # exclude negative times from the addition (if student was too early)
@@ -539,13 +631,18 @@ def get_late_time(subject_number, student_number):
     return jsonify(result)
     
 
-#'http://127.0.0.1:5000/api/class/update-absence-limit
 @app.route('/api/class/update-absence-limit', methods=['POST'])
+@jwt_required()
 def update_absence_limit():
     data = request.get_json()
     print(data) 
     subject_number = data['subjectNumber']
     absence_limit = data['absenceLimit']
+
+    is_valid_teacher = is_teacher_of_class(subject_number)
+
+    if not is_valid_teacher:
+        return jsonify({"message": "action not allowed"}), 403
 
     if not subject_number or absence_limit is None:
         return jsonify({"message": "subjectNumber and absenceLimit are required"}), 400
@@ -567,7 +664,9 @@ def update_absence_limit():
 
 
 @app.route('/api/update-attendance', methods=['POST'])
+@jwt_required()
 def update_attendance():
+
     data = request.get_json()
     print(data)
     subject_number = data['subjectNumber']
@@ -575,6 +674,10 @@ def update_attendance():
     status = data['status']
     time = data['time']
     date = data['date']
+
+    is_valid_teacher = is_teacher_of_class(subject_number)
+    if not is_valid_teacher:
+        return jsonify({"message": "not allowed"}), 403
 
     if(status == 'none'):
         return jsonify({"message": "update-attendance called but delete-attendance-record should have been called instead"}), 500
@@ -697,11 +800,16 @@ def update_attendance():
     return jsonify({"message": "Status updated successfully"}), 200
 
 @app.route('/api/delete-attendance-record', methods=['POST'])
+@jwt_required()
 def delete_attendance_record():
     data = request.get_json()
     subject_number = data['subjectNumber']
     student_number = data['studentNumber']
     date = data['date']
+
+    is_valid_teacher = is_teacher_of_class(subject_number)
+    if not is_valid_teacher:
+        return jsonify({"message": "not allowed"}), 403
 
     date_obj = datetime.strptime(date, '%d.%m.%Y')
     formatted_date = date_obj.strftime('%Y-%m-%d')
@@ -750,14 +858,37 @@ def generate_unique_filename(filename):
     return new_filename
 
 @app.route('/upload-file', methods=['POST'])
+@jwt_required()
 def upload_file():
-    if 'file' not in request.files:
-        return jsonify({'message': 'No file part'}), 400
     
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
     file = request.files['file']
     subject_number = request.form['subjectNumber']
     student_number = request.form['studentNumber']
     date = request.form['date']
+
+    if 'file' not in request.files:
+        return jsonify({'message': 'No file part'}), 400
+
+    # check if user has access to this operation
+    email = get_jwt_identity()
+    if(checkIfStudentEmail(email)):
+        cursor.execute("""SELECT student.studentNumber FROM student 
+                        JOIN user ON student.userID = user.userID 
+                        WHERE user.email = %s""", (email,))
+        student = cursor.fetchone()
+        
+
+        if not student or str(student["studentNumber"]) != str(student_number): # student is trying to upload file for someone else
+            cursor.close()
+            connection.close()
+            return jsonify({"error": "Unauthorized access"}), 403
+
+    else: # not a student
+        return jsonify({"error": "Unauthorized access"}), 403
+    
 
     
     if file.filename == '':
@@ -773,9 +904,7 @@ def upload_file():
         file.save(filepath)
         
         # Insert the file path into the database
-        
-        connection = get_db_connection()
-        cursor = connection.cursor()
+       
 
         # check if attendance Record for given date, student and class exists
         cursor.execute("""SELECT attendanceRecords.recordID FROM attendanceRecords 
@@ -816,13 +945,14 @@ def upload_file():
 
 
 @app.route('/list-files', methods=['GET'])
+@jwt_required()
 def list_files():
     
     connection = get_db_connection()
     cursor = connection.cursor()
     
     # if user is student, return null
-    user_mail = request.args.get('userMail')
+    user_mail = get_jwt_identity()
     if getWhetherUserIsTeacher(user_mail) == False:
         return jsonify(None)
 
@@ -874,6 +1004,7 @@ def list_files():
 
 
 @app.route('/doctors_note/decide/<operation>', methods=['POST'])
+@jwt_required()
 def accept_reject_note(operation):
 
     connection = get_db_connection()
@@ -926,6 +1057,7 @@ def accept_reject_note(operation):
 
 
 @app.route('/doctors_notes/<filename>', methods=['GET'])
+@jwt_required()
 def serve_file(filename):
     return send_from_directory(app.config['DN_UPLOAD_FOLDER'], filename)
 
