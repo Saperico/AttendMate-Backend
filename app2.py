@@ -675,6 +675,9 @@ def update_attendance():
     time = data['time']
     date = data['date']
 
+    if time == "0:0:00" or time == "00:00:00":
+        return jsonify({"message" : "Time is null"}), 400
+
     is_valid_teacher = is_teacher_of_class(subject_number)
     if not is_valid_teacher:
         return jsonify({"message": "not allowed"}), 403
@@ -733,45 +736,38 @@ def update_attendance():
             WHERE classID = (SELECT classID FROM class WHERE subjectNumber = %s)
               AND sessionDate = %s
         """, (subject_number, formatted_date))  
-        session = cursor.fetchone()
+        sessions = cursor.fetchall()
 
-        if session:
-            session_id = session['sessionID']
-            start_time = session['sessionStartTime']
-            end_time = session['sessionEndTime']
+        session_id = None
+        time_obj = datetime.strptime(time, '%H:%M:%S').time()
+        time_delta = timedelta(hours=time_obj.hour, minutes=time_obj.minute, seconds=time_obj.second)
 
-            # Time falls within the session's time range
-            time_obj = datetime.strptime(time, '%H:%M:%S').time()
-            time_delta = timedelta(hours=time_obj.hour, minutes=time_obj.minute, seconds=time_obj.second)
-            if start_time <= time_delta <= end_time:
-                pass  # Valid session, proceed with attendance
 
-            # Time is outside the session's time range
-            else:
-                print("Time does not match the existing session. Creating a new session...")
-                cursor.execute("""
+        # check if a session exists at this time
+        for session in sessions:
+            print(session['sessionStartTime'])
+            print("<=")
+            print(time_delta)
+            print("<=")
+            print(session['sessionEndTime'])
+            if session['sessionStartTime'] <= time_delta <= session['sessionEndTime']:
+                print("time within session")
+                session_id = session['sessionID']
+                break
+
+        # if no session at this time, create one
+        if not session_id:
+            cursor.execute("""
                 INSERT INTO ClassSession (classID, sessionDate, sessionStartTime, sessionEndTime)
                 VALUES (
                     (SELECT classID FROM class WHERE subjectNumber = %s),
                     %s,
                     %s,
-                    ADDTIME(%s, '01:00:00')  -- Example duration: 1 hour
+                    ADDTIME(%s, '01:00:00')
                 )
-                """, (subject_number, formatted_date, time, time))
-                session_id = cursor.lastrowid # lastrowid gives primary key id of last inserted row
-        else:
-            # No session exists for the given day, create one
-            print("No session found. Creating a new session...")
-            cursor.execute("""
-            INSERT INTO ClassSession (classID, sessionDate, sessionStartTime, sessionEndTime)
-            VALUES (
-                (SELECT classID FROM class WHERE subjectNumber = %s),
-                %s,
-                %s,
-                ADDTIME(%s, '01:00:00')  -- Example duration: 1 hour
-            )
             """, (subject_number, formatted_date, time, time))
-            session_id = cursor.lastrowid
+            session_id = cursor.lastrowid # lastrowid gives primary key id of last inserted row
+
 
         # Step 3: Insert the attendance record
         cursor.execute("""
