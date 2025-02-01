@@ -2,12 +2,13 @@ import smtplib
 import random
 import string
 
-email = "pwr.attendmate@gmail.com"
-server = smtplib.SMTP('smtp.gmail.com', 587)
-server.starttls()
-server.login(email, "uuua nqjl sctx ykoc")
 
 def send_email(receiver_email, password):
+    email = "pwr.attendmate@gmail.com"
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.starttls()
+    server.login(email, "uuua nqjl sctx ykoc")
+
     subject = "AttendMate - Email Verification"
     login_url = "http://localhost:3000/login"
     message = f"""

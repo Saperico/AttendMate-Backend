@@ -115,16 +115,28 @@ def register():
         return jsonify({'message': 'User already has a password, check your email'}), 400
     
 @app.route('/change-password', methods=['POST'])
+@jwt_required()
 def change_password():
     data = request.json
-    email = data.get('email')
-    password = data.get('password')
+    email = get_jwt_identity()  # Get email from JWT token
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    # Find user in database
     user = User.query.filter_by(email=email).first()
-    if user:
-        user.password = bcrypt.generate_password_hash(password).decode('utf-8')
-        db.session.commit()
-        return jsonify({'message': 'Password has been updated'})
-    return jsonify({'message': 'User not found'}), 404
+
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    # Check if current password is correct
+    if not (user and bcrypt.check_password_hash(user.password, current_password)):
+        return jsonify({'message': 'Current password is incorrect'}), 401
+
+    # Update password
+    user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    db.session.commit()
+
+    return jsonify({'message': 'Password has been updated successfully'})
     
     
 def get_db_connection():
@@ -472,70 +484,69 @@ def get_attendance_by_class_and_student(subject_number, student_number):
 @app.route('/api/class/<subject_number>/student/<student_number>/statistics', methods=['GET'])
 @jwt_required()
 def get_late_time(subject_number, student_number):
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-
     email = get_jwt_identity()
-    #check if its a teacher
 
-    if(checkIfStudentEmail(email)):
-        cursor.execute("""SELECT student.studentNumber FROM student 
-                        JOIN user ON student.userID = user.userID 
-                        WHERE user.email = %s""", (email,))
-        student = cursor.fetchone()
-        
-        cursor.close()
-        connection.close()
-        if not student or str(student["studentNumber"]) != str(student_number):
-            return jsonify({"error": "Unauthorized access"}), 403
+    # Establish database connection
+    with get_db_connection() as connection:
+        with connection.cursor(dictionary=True) as cursor:
 
-    # total late time in seconds
-    # exclude negative times from the addition (if student was too early)
-    cursor.execute("""
-        SELECT SUM(
-            CASE 
-                WHEN TIME_TO_SEC(SUBTIME(attendanceRecords.time, class.time)) >= 0 
-                THEN TIME_TO_SEC(SUBTIME(attendanceRecords.time, class.time))
-                ELSE 0
-            END
-        ) AS lateTime
-        FROM attendanceRecords
-        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
-        JOIN class ON class.classID = ClassSession.classID
-        JOIN student ON student.studentID = attendanceRecords.studentID
-        JOIN attendanceStatus ON attendanceStatus.attendanceID = attendanceRecords.status
-        WHERE class.subjectNumber = %s AND student.studentNumber = %s
-        AND attendanceStatus.status = %s
-    """, (subject_number, student_number, 'late'))
-    late_time = cursor.fetchone()
+            # Check if the user is a student and restrict access
+            if checkIfStudentEmail(email):
+                cursor.execute("""
+                    SELECT student.studentNumber FROM student 
+                    JOIN user ON student.userID = user.userID 
+                    WHERE user.email = %s
+                """, (email,))
+                student = cursor.fetchone()
 
+                if not student or str(student["studentNumber"]) != str(student_number):
+                    return jsonify({"error": "Unauthorized access"}), 403
 
-    cursor.execute("""
-        SELECT 
-            COUNT(CASE WHEN attendanceStatus.status IN ('late', 'present') THEN 1 END) AS timesInClass,
-            COUNT(CASE WHEN attendanceStatus.status = 'late' THEN 1 END) AS timesLate,
-            COUNT(CASE WHEN attendanceStatus.status IN ('absent', 'excused') THEN 1 END) AS missedClasses,
-            COUNT(CASE WHEN attendanceStatus.status = 'absent' THEN 1 END) As timesUnexcused
-        FROM attendanceRecords
-        join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
-        JOIN class ON class.classID = ClassSession.classID
-        JOIN student ON student.studentID = attendanceRecords.studentID
-        JOIN attendanceStatus 
-        ON attendanceStatus.attendanceID = attendanceRecords.status
-        WHERE class.subjectNumber = %s AND student.studentNumber = %s
-        """, (subject_number, student_number,))
-    attendance_times = cursor.fetchone()
+            # Query to calculate total late time
+            cursor.execute("""
+                SELECT SUM(
+                    CASE 
+                        WHEN TIME_TO_SEC(SUBTIME(attendanceRecords.time, class.time)) >= 0 
+                        THEN TIME_TO_SEC(SUBTIME(attendanceRecords.time, class.time))
+                        ELSE 0
+                    END
+                ) AS lateTime
+                FROM attendanceRecords
+                JOIN ClassSession ON attendanceRecords.classSessionID = ClassSession.sessionID
+                JOIN class ON class.classID = ClassSession.classID
+                JOIN student ON student.studentID = attendanceRecords.studentID
+                JOIN attendanceStatus ON attendanceStatus.attendanceID = attendanceRecords.status
+                WHERE class.subjectNumber = %s 
+                AND student.studentNumber = %s
+                AND attendanceStatus.status = %s
+            """, (subject_number, student_number, 'late'))
+            late_time = cursor.fetchone()
 
-    result = {
-        'lateTime': late_time['lateTime'],
-        'timesInClass': attendance_times['timesInClass'],
-        'timesLate': attendance_times['timesLate'],
-        'missedClasses': attendance_times['missedClasses'],
-        'timesUnexcused': attendance_times['timesUnexcused']
-    }
+            # Query to get attendance statistics
+            cursor.execute("""
+                SELECT 
+                    COUNT(CASE WHEN attendanceStatus.status IN ('late', 'present') THEN 1 END) AS timesInClass,
+                    COUNT(CASE WHEN attendanceStatus.status = 'late' THEN 1 END) AS timesLate,
+                    COUNT(CASE WHEN attendanceStatus.status IN ('absent', 'excused') THEN 1 END) AS missedClasses,
+                    COUNT(CASE WHEN attendanceStatus.status = 'absent' THEN 1 END) AS timesUnexcused
+                FROM attendanceRecords
+                JOIN ClassSession ON attendanceRecords.classSessionID = ClassSession.sessionID
+                JOIN class ON class.classID = ClassSession.classID
+                JOIN student ON student.studentID = attendanceRecords.studentID
+                JOIN attendanceStatus ON attendanceStatus.attendanceID = attendanceRecords.status
+                WHERE class.subjectNumber = %s AND student.studentNumber = %s
+            """, (subject_number, student_number,))
+            attendance_times = cursor.fetchone()
 
-    cursor.close()
-    connection.close()
+            # Return results
+            result = {
+                'lateTime': late_time['lateTime'] if late_time and late_time['lateTime'] is not None else 0,
+                'timesInClass': attendance_times['timesInClass'] if attendance_times else 0,
+                'timesLate': attendance_times['timesLate'] if attendance_times else 0,
+                'missedClasses': attendance_times['missedClasses'] if attendance_times else 0,
+                'timesUnexcused': attendance_times['timesUnexcused'] if attendance_times else 0
+            }
+
     return jsonify(result)
     
 
