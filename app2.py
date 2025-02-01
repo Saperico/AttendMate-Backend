@@ -7,7 +7,7 @@ from flask_bcrypt import Bcrypt
 from flask import send_from_directory
 import mysql.connector
 from datetime import datetime, timedelta
-from mail import *
+from mail import send_email, generate_password
 import pandas as pd
 from werkzeug.utils import secure_filename
 import os
@@ -88,13 +88,13 @@ def login():
 
 def checkIfStudentEmail(email):
     return email[0:6].isdigit() and email.endswith('@student.pwr.edu.pl') or email in ['emilydavis@example.com','michaelwilson@example.com',
-'davidmiller@example.com',
-'emmajohnson@example.com',
-'oliviabrown@example.com',
-'liamsmith@example.com',
-'sophiadavis@example.com',
-'noahwilson@example.com',
-'isabellagarcia@example.com']
+    'davidmiller@example.com',
+    'emmajohnson@example.com',
+    'oliviabrown@example.com',
+    'liamsmith@example.com',
+    'sophiadavis@example.com',
+    'noahwilson@example.com',
+    'isabellagarcia@example.com']
 
 @app.route('/register', methods=['POST'])
 def register():

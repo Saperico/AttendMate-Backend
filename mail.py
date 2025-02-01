@@ -45,4 +45,4 @@ def send_email(receiver_email, password):
 def generate_password(length=12):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     password = ''.join(random.choices(characters, k=length))
-    return 
+    return password
