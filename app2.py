@@ -468,12 +468,12 @@ def get_attendance_by_class_and_student(subject_number, student_number):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
     date_format = '%d.%m.%YT%H:%i'
-    cursor.execute("""SELECT DATE_FORMAT(CONCAT(attendanceRecords.date, ' ', attendanceRecords.time), %s)  as date, attendanceStatus.status as status
-                   FROM attendanceRecords JOIN attendanceStatus
-                   ON attendanceRecords.status = attendanceStatus.attendanceID
-                   join ClassSession on attendanceRecords.classSessionID = ClassSession.sessionID
-                   JOIN class ON class.classID = ClassSession.classID
-                   JOIN student ON attendanceRecords.studentID = student.studentID
+    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date, status
+                   from ClassSession 
+                   left join class on ClassSession.classID = class.classID
+                   left join AttendMate.studentsInClasses sIC on class.classID = sIC.classID
+                   left join AttendMate.attendanceRecords aR on ClassSession.sessionID = aR.classSessionID
+                   left join student on sIC.studentID = student.studentID
                    WHERE student.studentNumber = %s
                    AND class.subjectNumber = %s""", (date_format, student_number, subject_number))
     results = cursor.fetchall()
