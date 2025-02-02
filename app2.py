@@ -342,8 +342,9 @@ def get_students_by_class(subject_number):
     JOIN user ON student.userID = user.userID
     JOIN studentsInClasses ON student.studentID = studentsInClasses.studentID
     JOIN class ON studentsInClasses.classID = class.classID
+    LEFT JOIN ClassSession ON ClassSession.classID = class.classID
     LEFT JOIN attendanceRecords ON student.studentID = attendanceRecords.studentID 
-        AND class.classID = attendanceRecords.classSessionID
+        AND ClassSession.sessionID = attendanceRecords.classSessionID
     WHERE class.subjectNumber = %s
     GROUP BY student.studentNumber, user.name, user.lastName;""", (subject_number,))
     results = cursor.fetchall()
