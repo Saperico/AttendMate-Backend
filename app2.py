@@ -400,7 +400,8 @@ def get_students_by_current_class():
 
     # get students and status from that class
     cursor.execute("""
-    SELECT 
+    SELECT
+        class.subjectNumber,
         class.subjectName,
         student.studentNumber, 
         user.name, 
@@ -437,10 +438,11 @@ def get_class_by_number(subject_number):
         FROM class WHERE subjectNumber = %s""", (subject_number,))
     result = cursor.fetchone()
 
-    if isinstance(result['day'], datetime):
-        result['day'] = result['day'].strftime('%Y-%m-%d %H:%M:%S')
-    elif isinstance(result['time'], timedelta):
-            result['time'] = str(result['time'])
+    if result:
+        if isinstance(result['day'], datetime):
+            result['day'] = result['day'].strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(result['time'], timedelta):
+                result['time'] = str(result['time'])
 
     cursor.close()
     connection.close()
@@ -553,13 +555,15 @@ def get_attendance_by_class_and_student(subject_number, student_number):
             return jsonify({'message': 'Not allowed: You do not teach this class'}), 403
 
     date_format = '%d.%m.%YT%H:%i'
-    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date, attendanceStatus.status
+
+    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date,
+                   attendanceStatus.status
                    from ClassSession 
                    left join class on ClassSession.classID = class.classID
                    left join AttendMate.studentsInClasses sIC on class.classID = sIC.classID
-                   left join AttendMate.attendanceRecords aR on ClassSession.sessionID = aR.classSessionID
-                   left join AttendMate.attendanceStatus on attendanceStatus.attendanceID = aR.status
                    left join student on sIC.studentID = student.studentID
+                   left join AttendMate.attendanceRecords aR on ClassSession.sessionID = aR.classSessionID AND aR.studentID = student.studentID
+                   left join AttendMate.attendanceStatus on attendanceStatus.attendanceID = aR.status           
                    WHERE student.studentNumber = %s
                    AND class.subjectNumber = %s""", (date_format, student_number, subject_number))
     results = cursor.fetchall()
@@ -1129,3 +1133,4 @@ def insert_attendance(student_id, room, date, time):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
