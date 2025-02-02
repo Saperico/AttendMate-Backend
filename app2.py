@@ -1065,12 +1065,13 @@ def serve_file(filename):
     return send_from_directory(app.config['DN_UPLOAD_FOLDER'], filename)
 
 """
+import cv2
+import numpy as np
+
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 recognizer = cv2.face.LBPHFaceRecognizer_create()
-recognizer.read('face_recognizer.yml')  # Ensure this file exists
+recognizer.read('face_recognizer.yml')
 
-# Mock database of people (replace with SQL connection later)
-people = {1: "John Doe", 2: "Jane Smith"}
 THRESHOLD = 65
 
 @app.route('/upload-photo', methods=['POST'])
@@ -1090,8 +1091,14 @@ def upload_image():
         roi_gray = gray[y:y + h, x:x + w]
         label, confidence = recognizer.predict(roi_gray)
         
-        if confidence < THRESHOLD and label in people:
-            name = people[label]
+        if confidence < THRESHOLD:
+            student_id = label
+            student = Student.query.get(student_id)
+            name = student.name
+            room = request.form.get('room')
+            date = request.form.get('date')
+            time = request.form.get('time')
+            insert_attendance(student_id, room, date, time)
         else:
             name = "Unknown"
         
@@ -1099,8 +1106,26 @@ def upload_image():
 
     return jsonify({"faces": results})
 
-"""
+def insert_attendance(student_id, room, date, time):
+    connection = get_db_connection()
+    cursor = connection.cursor()
 
+    
+    cursor.execute(""
+    INSERT INTO attendanceRecords (classSessionID, studentID, date, time, status)
+    VALUES (
+        (SELECT sessionID FROM ClassSession WHERE sessionDate = %s AND sessionStartTime <= %s AND sessionEndTime >= %s),
+        %s,
+        %s,
+        %s,
+        (SELECT attendanceID FROM attendanceStatus WHERE status = 'present')
+    )
+    "", (date, time, time, student_id, date, time))
+
+    connection.commit()
+    cursor.close()
+    connection.close()
+"""
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
