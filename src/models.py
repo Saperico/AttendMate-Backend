@@ -3,10 +3,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.dialects.mysql import TINYINT
-from app import db
 
-
-
+db = create_engine('mysql+pymysql://root:root@localhost:3306/facial_recognition')
 
 class AttendanceStatus(db.Model):
     __tablename__ = 'attendanceStatus'

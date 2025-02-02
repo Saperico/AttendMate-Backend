@@ -527,19 +527,19 @@ def get_is_valid_teacher(subject_number):
     return jsonify(is_teacher)
 
 @app.route('/api/class/<subject_number>/student/<student_number>/attendance', methods=['GET'])
-@jwt_required()
+#@jwt_required()
 def get_attendance_by_class_and_student(subject_number, student_number):
     
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
 
-    email = get_jwt_identity()
+    """email = get_jwt_identity()
     #check if its a teacher
 
     if(checkIfStudentEmail(email)): # check if student has access
-        cursor.execute("""SELECT student.studentNumber FROM student 
+        cursor.execute(""SELECT student.studentNumber FROM student 
                         JOIN user ON student.userID = user.userID 
-                        WHERE user.email = %s""", (email,))
+                        WHERE user.email = %s"", (email,))
         student = cursor.fetchone()
         
 
@@ -547,18 +547,19 @@ def get_attendance_by_class_and_student(subject_number, student_number):
             cursor.close()
             connection.close()
             return jsonify({"error": "Unauthorized access"}), 403
-
     else: # check if teacher has access
         valid_teacher = is_teacher_of_class(subject_number)
         if not valid_teacher:
             return jsonify({'message': 'Not allowed: You do not teach this class'}), 403
+            """
 
     date_format = '%d.%m.%YT%H:%i'
-    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date, status
+    cursor.execute("""SELECT DATE_FORMAT(CONCAT(ClassSession.sessionDate, ' ', coalesce(aR.time, sessionStartTime)), %s)  as date, attendanceStatus.status
                    from ClassSession 
                    left join class on ClassSession.classID = class.classID
                    left join AttendMate.studentsInClasses sIC on class.classID = sIC.classID
                    left join AttendMate.attendanceRecords aR on ClassSession.sessionID = aR.classSessionID
+                   left join AttendMate.attendanceStatus on attendanceStatus.attendanceID = aR.status
                    left join student on sIC.studentID = student.studentID
                    WHERE student.studentNumber = %s
                    AND class.subjectNumber = %s""", (date_format, student_number, subject_number))
