@@ -1064,8 +1064,43 @@ def accept_reject_note(operation):
 def serve_file(filename):
     return send_from_directory(app.config['DN_UPLOAD_FOLDER'], filename)
 
+"""
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+recognizer = cv2.face.LBPHFaceRecognizer_create()
+recognizer.read('face_recognizer.yml')  # Ensure this file exists
 
+# Mock database of people (replace with SQL connection later)
+people = {1: "John Doe", 2: "Jane Smith"}
+THRESHOLD = 65
+
+@app.route('/upload-photo', methods=['POST'])
+def upload_image():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    file = request.files['image']
+    npimg = np.frombuffer(file.read(), np.uint8)
+    image = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=10, minSize=(30, 30))
+
+    results = []
+    for (x, y, w, h) in faces:
+        roi_gray = gray[y:y + h, x:x + w]
+        label, confidence = recognizer.predict(roi_gray)
+        
+        if confidence < THRESHOLD and label in people:
+            name = people[label]
+        else:
+            name = "Unknown"
+        
+        results.append({"name": name, "confidence": float(confidence), "bbox": [int(x), int(y), int(w), int(h)]})
+
+    return jsonify({"faces": results})
+
+"""
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
